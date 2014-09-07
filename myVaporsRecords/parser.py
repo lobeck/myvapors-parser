@@ -89,6 +89,9 @@ def parse_record(record):
 def parse_file(database_file):
     """
     read a file containing records without any separator (like myVapors .dat file)
+
+    the returned records are sorted by date (this is done by myVapors after import)
+
     :param file filename:
     :rtype: list[VapeRecord]
     """
