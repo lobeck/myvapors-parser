@@ -1,0 +1,22 @@
+#!/usr/bin/env python
+
+from argparse import ArgumentParser
+import os
+import platform
+from myVaporsRecords.parser import parse_file
+
+path_hint = ''
+if platform.system() == 'Darwin':
+    path_hint = 'should be: %s/Library/Application Support/myVapor/XXXXXXXXXX.dat (where X is your eVic serial number' % \
+                os.environ['HOME']
+
+parser = ArgumentParser('Convert myVapors database to csv')
+parser.add_argument('--database', type=file, required=True, help='myVapors database file - %s' % path_hint)
+
+args = parser.parse_args()
+
+records = parse_file(args.database)
+
+print "date,time,resistance,voltage,duration"
+for record in records:
+    print record.csv()
