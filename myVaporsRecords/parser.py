@@ -1,5 +1,3 @@
-import re
-import logging
 import datetime
 from myVaporsRecords import VapeRecord
 
@@ -16,7 +14,7 @@ def parse_record(record):
 
     Duuy yyyy mmmm dddd HHHH HHHH MMMM MMMM xyss ssss rrrr rrrr vvvv vvvv zzzz zzzz
 
-    D = 'dayBit' - day is only 4 bits (0 - 15) so the dayBit adds another 16 days to complete a month
+    D = 'dayBit' - day is only 4 bits (0 - 15) so the dayBit adds another 16 days to handle a full month
     u = unknown (maybe they belong to year, but i'm not sure, so they are unknown for now
     y = year (5 bits)
     m = month (4 bits)
@@ -33,57 +31,56 @@ def parse_record(record):
     :param record: single 8 byte record
     :rtype: VapeRecord
     """
-    _log = logging.getLogger('myVaporsRecords.parser')
-
     if len(record) < 8:  # fail if less than 8 bytes remaining (handles EOF)
         raise ValueError('record less than 8 bytes')
 
-    record_bin = ''.join(['{0:08b}'.format(ord(c)) for c in record])  # convert record to a 64 char bit string
+    # split the record in 8 byte/integers
+    _record = [ord(byte) for byte in record]
 
-    _log.debug(record_bin)
+    # the year is in the least significant 5 bits of the first byte
+    year = _record[0] & 31  # AND with 00011111
+    year += 2000  # year is only 5 bits (max. 32 years), so add the missing 2000 years
 
-    # regex to read all known values into a dict
-    # for those who are unfamiliar with pythons re syntax:
+    # the month is in the most significant 4 bits of the second byte
+    month = (_record[1] & 240) >> 4  # AND with 11110000, then shift 4 bit to the right (will make 00001111)
+
+    # day is a bit tricky, since the MSB of the first byte is an additional bit (see 'dayBit' above)
+    # in python: if dayBit == 1: day += 16
     #
-    # ?P<resistance>\d{8}) => take 8 digits and save them as named key 'resistance'
+    # first AND with 15 = 00001111 to get the 4 day bits
     #
-    regex = r'(?P<dayBit>\d)' \
-            '(?P<unknown>\d{2})' \
-            '(?P<year>\d{5})' \
-            '(?P<month>\d{4})' \
-            '(?P<day>\d{4})' \
-            '(?P<hour>\d{8})' \
-            '(?P<minute>\d{8})' \
-            '(?P<MvrVV>\d)' \
-            '(?P<MvrVW>\d)' \
-            '(?P<second>\d{6})' \
-            '(?P<resistance>\d{8})' \
-            '(?P<voltage>\d{8})' \
-            '(?P<duration>\d{8})'
+    # then get the 'dayBit', which is the highest bit in the first byte of a record 128 = 10000000 using AND
+    # next shift it 3 bits to the right to set it as the 5th bit
+    # finally OR both values to make the day 5 bits (32 days)
+    day = (_record[1] & 15) | ((_record[0] & 128) >> 3)
 
-    record_dict = re.match(regex, record_bin).groupdict()
+    # the hour is in the third byte
+    hour = _record[2]
 
-    # convert binary values to integers
-    # voltage, duration and resistance will be divided by 10 to get their actual values
-    for key, value in record_dict.iteritems():
-        if key in ['voltage', 'duration', 'resistance']:
-            record_dict[key] = float(int(value, 2)) / 10
-        else:
-            record_dict[key] = int(value, 2)
+    # the minute is the fourth byte
+    minute = _record[3]
 
-    # add 16 days if dayBit is set
-    # day is only 4 bits (0 - 15) so the 'dayBit' adds another 16 days to complete a month
-    if record_dict['dayBit'] == 1:
-        record_dict['day'] += 16
-    record_dict.pop('dayBit', None)
+    # MvrVV is the MSB of the fifth byte
+    mvrvv = _record[4] & 128 == 128  # AND with 10000000 (128 when set, 0 when unset)
 
-    # year is starting at 2000 - so we have to add 2000 years for the actual date
-    record_dict['year'] += 2000
+    # MvrVW is the second bit of the fifth byte
+    mvrvw = _record[4] & 64 == 64  # AND with 01000000 (64 when set, 0 when unset)
 
-    vape_date = datetime.datetime(record_dict['year'], record_dict['month'], record_dict['day'], record_dict['hour'],
-                                  record_dict['minute'], record_dict['second'])
+    # seconds are in the 6 LSB of the fifth byte
+    second = _record[4] & 63  # AND with 00111111
 
-    return VapeRecord(vape_date, record_dict['resistance'], record_dict['voltage'], record_dict['duration'])
+    # resistance is the sixth byte and multiplied by 10 to allow 1/10 ohm accuracy
+    resistance = float(_record[5]) / 10
+
+    # voltage is the seventh byte and multiplied by 10 to allow 1/10 volt accuracy
+    voltage = float(_record[6]) / 10
+
+    # duration is the eighth byte and multiplied by 10 to allow 1/10 second accuracy
+    duration = float(_record[7]) / 10
+
+    vape_date = datetime.datetime(year, month, day, hour, minute, second)
+
+    return VapeRecord(vape_date, resistance, voltage, duration)
 
 
 def parse_file(database_file):
