@@ -101,6 +101,12 @@ def parse_file(database_file):
         if len(record) < 8:
             break
 
+        if record == '\xff\xff\xff\xff\xff\xff\xff\xff':
+            break
+
+        if record == '\x00\x00\x00\x00\x00\x00\x00\x00':
+            break
+
         record_list.append(parse_record(record))
 
     return record_list
